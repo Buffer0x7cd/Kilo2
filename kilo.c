@@ -4,13 +4,21 @@
 #include <termios.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <sys/ioctl.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
-
 /*****************data*************************************/
-struct termios orig_termios;
 
+
+struct editorConfig
+{
+	struct termios orig_termios;
+	int screenrows;
+	int screencols;
+};
+
+struct editorConfig E;
 /******************terminal**************/
 /*
  * Helper method for printing the error and
@@ -40,15 +48,16 @@ char editorReadKey()
  * of user's terminal */
 void disableRawMode()
 {
-	if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1 ) die("tcsetattr");
+
+	if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1 ) die("tcsetattr");
 }
 
 
 void enableRawMode()
 {
 	struct termios raw;
-        if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr");	
-	raw = orig_termios;
+        if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");	
+	raw = E.orig_termios;
 
 	atexit(disableRawMode);
 	raw.c_iflag &= ~(BRKINT|INPCK|ISTRIP|IXON|ICRNL);
@@ -62,13 +71,40 @@ void enableRawMode()
 	if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
+int getWindowSize(int *rows, int *cols)
+{
+	struct winsize ws;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
+	{
+		return -1;
+	}
+	else
+	{
+		*rows = ws.ws_row;
+		*cols = ws.ws_col;
+		return 0;
+	}
+}
+
 /**************output*****************************/
+
+void editorDrawRows()
+{
+	int y;
+	for (y = 0; y < E.screenrows; y++)
+		write(STDOUT_FILENO, "~\r\n", 3);
+}
 
 void editorRefreshScreen()
 {
 	write(STDOUT_FILENO, "\x1b[2J", 4);
 	write(STDOUT_FILENO, "\x1b[H",3);
+
+	editorDrawRows();
+	write(STDOUT_FILENO, "\x1b[H",3);
 }
+
+
 /********************input************************/
 
 void editorProcessKeypress()
@@ -84,9 +120,15 @@ void editorProcessKeypress()
 
 
 /*************init**************/
+void initEditor()
+{
+	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+}
+
 int main(void)
 {
 	enableRawMode();
+	initEditor();
 	while(1)
 	{
 		editorRefreshScreen();
