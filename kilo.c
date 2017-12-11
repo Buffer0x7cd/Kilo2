@@ -8,20 +8,34 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 
-
+/*****************data*************************************/
 struct termios orig_termios;
 
+/******************terminal**************/
 /*
  * Helper method for printing the error and
  * exit the program */
+
+
 void die(const char *msg)
 {
+
+	write(STDOUT_FILENO, "\x1b[2J", 4);
+	write(STDOUT_FILENO, "\x1b[H",3);
 	perror(msg);
 	exit(1);
 }
 
 
-
+char editorReadKey()
+{
+	int nread;
+	char c;
+	while((nread = read(STDIN_FILENO, &c, 1)) != 1)
+		if (nread == -1) 
+			die("read");
+	return c;
+}
 /*cleanup routine to store the default behavaior
  * of user's terminal */
 void disableRawMode()
@@ -48,23 +62,35 @@ void enableRawMode()
 	if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
+/**************output*****************************/
+
+void editorRefreshScreen()
+{
+	write(STDOUT_FILENO, "\x1b[2J", 4);
+	write(STDOUT_FILENO, "\x1b[H",3);
+}
+/********************input************************/
+
+void editorProcessKeypress()
+{
+	char c = editorReadKey();
+	switch(c)
+	{
+		case CTRL_KEY('q'):
+			exit(0);
+			break;
+	}
+}
+
+
+/*************init**************/
 int main(void)
 {
 	enableRawMode();
 	while(1)
 	{
-		char c = '\0';
-		if(read(STDIN_FILENO, &c, 1) == -1)
-				die("read error");
-		if(iscntrl(c))
-		{
-			printf("%d\r\n",c);
-		}
-		else
-		{
-			printf("%d ('%c')\r\n",c,c);
-		}
-		if (c == CTRL_KEY('q')) break;
+		editorRefreshScreen();
+		editorProcessKeypress();
 	}
 	return 0;
 }
