@@ -2,18 +2,21 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <termios.h>
-#include <stdlib.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
-
+#define ABUF_INIT {NULL, 0}
+#define KILO_VERSION "0.1"
 /*****************data*************************************/
 
 
 struct editorConfig
 {
 	struct termios orig_termios;
+	int cx, cy;
 	int screenrows;
 	int screencols;
 };
@@ -86,26 +89,110 @@ int getWindowSize(int *rows, int *cols)
 	}
 }
 
+
+/****************append buffer ********************/
+struct abuf
+{
+	char *b;
+	int len;
+};
+
+int abAppend(struct abuf *ab, const char *s, int len)
+{
+	char *new = realloc(ab->b, ab->len+ len);
+	if(new == NULL)
+		die("abAppend");
+
+	memcpy(&new[ab->len], s, len);
+	ab->b = new;
+	ab->len += len;
+
+	return 0;
+}
+
+void abFree(struct abuf *ab)
+{
+	free(ab->b);
+}
+
 /**************output*****************************/
 
-void editorDrawRows()
+void editorDrawRows(struct abuf *ab)
 {
 	int y;
 	for (y = 0; y < E.screenrows; y++)
-		write(STDOUT_FILENO, "~\r\n", 3);
+	{
+		if (y == E.screenrows/3)
+		{
+			char welcome[80];
+			int welcomelen;
+			welcomelen = snprintf(welcome, sizeof(welcome),
+			"Kilo editor -- version %s", KILO_VERSION);
+			if( welcomelen > E.screencols ) welcomelen = E.screencols;
+			int padding = (E.screencols - welcomelen)/2;
+			if (padding)
+			{
+				abAppend(ab,"~",1);
+				padding--;
+			}
+			while(padding--)
+				abAppend(ab, " ",1);
+			abAppend(ab,welcome, welcomelen);
+		}
+		else
+		{
+			abAppend(ab, "~",1);
+		}
+
+		abAppend(ab,"\x1b[K",3);
+		if(y < E.screenrows - 1)
+			abAppend(ab, "\r\n", 2);
+
+	}
 }
 
 void editorRefreshScreen()
 {
-	write(STDOUT_FILENO, "\x1b[2J", 4);
-	write(STDOUT_FILENO, "\x1b[H",3);
+	struct abuf ab = ABUF_INIT;
 
-	editorDrawRows();
-	write(STDOUT_FILENO, "\x1b[H",3);
+	//write(STDOUT_FILENO, "\x1b[2J", 4);
+	abAppend(&ab, "\x1b[H",3);
+
+	editorDrawRows(&ab);
+
+	char buf[32];
+	snprintf(buf,sizeof(buf),"\x1b[%d;%dH", E.cy+1, E.cx+1);
+	abAppend(&ab, buf, strlen(buf));
+
+	//abAppend(&ab, "\x1b[H",3);
+	int byte_write;
+	if ((byte_write = write(STDOUT_FILENO, ab.b, ab.len)) != ab.len) 
+		die("Error while writing");
+	abFree(&ab);
 }
 
 
 /********************input************************/
+
+void editorMoveCursor(char key)
+{
+	switch (key)
+	{
+		case 'a':
+			E.cx--;
+			break;
+		case 'd':
+			E.cx++;
+			break;
+		case 'w':
+			E.cy--;
+			break;
+		case 's':
+			E.cy++;
+			break;
+	}
+}
+
 
 void editorProcessKeypress()
 {
@@ -113,7 +200,15 @@ void editorProcessKeypress()
 	switch(c)
 	{
 		case CTRL_KEY('q'):
+			write(STDOUT_FILENO, "\x1b[2J", 4);
+			write(STDOUT_FILENO, "\x1b[H",3);
 			exit(0);
+			break;
+		case 'w':
+		case 's':
+		case 'a':
+		case 'd':
+			editorMoveCursor(c);
 			break;
 	}
 }
@@ -122,6 +217,8 @@ void editorProcessKeypress()
 /*************init**************/
 void initEditor()
 {
+	E.cx = 0;
+	E.cy = 0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 }
 
